@@ -1,8 +1,73 @@
 import time
 import openai
 import json
+import os
+import requests
 
 from openai.types.beta.threads.run import RequiredActionSubmitToolOutputs
+
+def call_api_function(function_name, function_args_str):
+    # URL de la API basada en el nombre de la función
+    apiUrl = f"https://santagema-api-prod.azurewebsites.net/{function_name}"
+
+    # Definimos los headers de la petición
+    headers = {
+        'Authorization': f'Bearer {os.environ.get("SGHUBDOCS_SECRETARY_KEY")}',
+        'Content-Type': 'application/json'  # Asegurándose de que el contenido se envíe como JSON
+    }
+
+    if isinstance(function_args_str, str):
+        function_args = json.loads(function_args_str)
+    else:
+        function_args = function_args_str
+
+    # Eliminamos el parámetro 'tipo_peticion', si existe
+    tipo_peticion = function_args.pop('tipo_peticion', None)  # Usamos pop para evitar errores si la clave no existe
+
+    # Dependiendo del tipo de petición, realizamos un GET o POST
+    if tipo_peticion == "POST":
+        # Para un POST, enviamos el cuerpo con los argumentos restantes
+        function_args_json =  json.dumps(function_args)                
+        response = requests.post(apiUrl, data=function_args_json, headers=headers)
+    else: #tipo_peticion == "GET":
+        # Para un GET, añadimos los argumentos a la URL como parámetros
+        response = requests.get(apiUrl, params=function_args, headers=headers)
+    #else:
+        # Manejo de error o tipo de petición no soportado
+        #return "Tipo de petición no soportado o ausente"
+
+    # Devolvemos el contenido de la respuesta
+    # Aquí podrías ajustar para manejar diferentes tipos de contenidos si necesario
+    if response.headers['Content-Type'] == 'application/json':
+        try:
+            return response.json()  # Devuelve el contenido JSON
+        except json.JSONDecodeError:
+            return "Error al decodificar el JSON"
+    else:
+        return response.text  # Devuelve el contenido como texto
+
+
+def submit_tool_outputs(thread_id, run_id, tools_to_call):
+    tool_output_array = []
+    for tool in tools_to_call:
+        output = None
+        tool_call_id = tool.id
+        function_name = tool.function.name
+        function_args = tool.function.arguments
+
+        output = call_api_function(function_name, function_args)
+        if output:
+            tool_output_array.append({"tool_call_id": tool_call_id, "output": output})
+
+    #compruebo si tool_output_array es vacío y devuelvo un no es posible ejecutar la solicitud y devuelve el tools_output_array en el mensaje de error
+    if not tool_output_array:
+        return f"No es posible ejecutar la solicitud"
+    else:
+        return client.beta.threads.runs.submit_tool_outputs(
+            thread_id=thread_id,
+            run_id=run_id,
+            tool_outputs=tool_output_array
+    )
 
 
 def extract_and_print_fields(submit_tool_outputs: RequiredActionSubmitToolOutputs):
@@ -54,7 +119,8 @@ thread = client.beta.threads.create()
 try:
     while True:
         # Solicitamos al usuario que introduzca un mensaje
-        user_input = input("Enter your math question or type 'exit' to finish: ")
+        #user_input = input("Enter your math question or type 'exit' to finish: ")
+        user_input = input("User: ")
         if user_input.lower() == 'exit':
             break
 
@@ -68,17 +134,19 @@ try:
         # Creación de la ejecución se mantiene igual
         run = client.beta.threads.runs.create(
             thread_id=thread.id,
+
             #assistant_id=assistant.id,
             assistant_id="asst_pIoOSfsAwszdWrSEyBlbRhcj",
             #instructions="Please address the user as Jane Doe. The user has a premium account.",
         )
 
-        print("Checking assistant status...")
+        #print("Checking assistant status...")
         while True:
             run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
 
             if run.status == "completed":
-                print("Done!")
+                print()
+                #print("Done!")
                 messages = client.beta.threads.messages.list(thread_id=thread.id)
 
                 # Solo imprimimos el último mensaje
@@ -92,12 +160,15 @@ try:
                     print(f"{last_message.role}: {message_text}")
                 break
             elif run.status == "requires_action":
-                print(f"requires_action... {run.required_action.type} {run.required_action.submit_tool_outputs.tool_calls}")
-                extract_and_print_fields(run.required_action.submit_tool_outputs)
+                print("a", end="", flush=True)
+                #print(f"requires_action... {run.required_action.type} {run.required_action.submit_tool_outputs.tool_calls}")
+                #extract_and_print_fields(run.required_action.submit_tool_outputs)
+                submit_tool_outputs(thread_id=thread.id, run_id=run.id, tools_to_call=run.required_action.submit_tool_outputs.tool_calls)
                 #client.beta.threads.runs.submit_tool_outputs(thread_id=thread.id, run_id=run.id, )
 
             else:
-                print(f"In progress... {run.status}")
+                #print(f"In progress... {run.status}")
+                print(".", end="", flush=True)
                 time.sleep(1)
 
 finally:
