@@ -9,9 +9,12 @@ client = AsyncOpenAI()
 
 
 async def main() -> None:
+    prompt = "Resumen crimen y castigo"
+
     stream = await client.completions.create(
         model="gpt-3.5-turbo-instruct",
-        prompt="Say this is a test",
+        prompt=prompt,
+        max_tokens= 4096 - len(prompt.split())-100,
         stream=True,
     )
     async for completion in stream:
