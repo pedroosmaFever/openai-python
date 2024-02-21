@@ -6,45 +6,51 @@ import requests
 
 from openai.types.beta.threads.run import RequiredActionSubmitToolOutputs
 
+import requests
+import json
+import os
+
 def call_api_function(function_name, function_args_str):
-    # URL de la API basada en el nombre de la función
     apiUrl = f"https://santagema-api-prod.azurewebsites.net/{function_name}"
 
-    # Definimos los headers de la petición
     headers = {
         'Authorization': f'Bearer {os.environ.get("SGHUBDOCS_SECRETARY_KEY")}',
-        'Content-Type': 'application/json'  # Asegurándose de que el contenido se envíe como JSON
+        'Content-Type': 'application/json'
     }
 
-    if isinstance(function_args_str, str):
-        function_args = json.loads(function_args_str)
-    else:
-        function_args = function_args_str
+    try:
+        if isinstance(function_args_str, str):
+            function_args = json.loads(function_args_str)
+        else:
+            function_args = function_args_str
 
-    # Eliminamos el parámetro 'tipo_peticion', si existe
-    tipo_peticion = function_args.pop('tipo_peticion', None)  # Usamos pop para evitar errores si la clave no existe
+        tipo_peticion = function_args.pop('tipo_peticion', None)
 
-    # Dependiendo del tipo de petición, realizamos un GET o POST
-    if tipo_peticion == "POST":
-        # Para un POST, enviamos el cuerpo con los argumentos restantes
-        function_args_json =  json.dumps(function_args)                
-        response = requests.post(apiUrl, data=function_args_json, headers=headers)
-    else: #tipo_peticion == "GET":
-        # Para un GET, añadimos los argumentos a la URL como parámetros
-        response = requests.get(apiUrl, params=function_args, headers=headers)
-    #else:
-        # Manejo de error o tipo de petición no soportado
-        #return "Tipo de petición no soportado o ausente"
+#        if tipo_peticion not in ["POST", "GET"]:
+#            return "Tipo de petición no soportado o ausente"
 
-    # Devolvemos el contenido de la respuesta
-    # Aquí podrías ajustar para manejar diferentes tipos de contenidos si necesario
-    if response.headers['Content-Type'] == 'application/json':
-        try:
-            return response.json()  # Devuelve el contenido JSON
-        except json.JSONDecodeError:
-            return "Error al decodificar el JSON"
-    else:
-        return response.text  # Devuelve el contenido como texto
+        if tipo_peticion == "POST":
+            response = requests.post(apiUrl, json=function_args, headers=headers)
+        else: #GET o sin especificar
+            response = requests.get(apiUrl, params=function_args, headers=headers)
+
+        if response.status_code >= 200 and response.status_code < 300:
+            if 'application/json' in response.headers['Content-Type']:
+                try:
+                    return json.dumps(response.json())
+                except json.JSONDecodeError:
+                    return "Error al decodificar el JSON"
+            else:
+                return response.text
+        else:
+            return f"Error en la solicitud: {response.status_code}, Respuesta: {response.text}"
+    except requests.ConnectionError:
+        return "Error de conexión"
+    except requests.Timeout:
+        return "La solicitud ha superado el tiempo de espera"
+    except requests.RequestException as e:
+        return f"Error en la solicitud: {e}"
+
 
 
 def submit_tool_outputs(thread_id, run_id, tools_to_call):
@@ -56,6 +62,9 @@ def submit_tool_outputs(thread_id, run_id, tools_to_call):
         function_args = tool.function.arguments
 
         output = call_api_function(function_name, function_args)
+        print(f"Tool Call ID: {tool_call_id}, Function Name: {function_name}, Function Arguments: {function_args} --> Output: {output}")
+        #print(f" {function_name} -> {function_args} -> {output}")
+        #print(f" {function_name} ")
         if output:
             tool_output_array.append({"tool_call_id": tool_call_id, "output": output})
 
@@ -80,8 +89,8 @@ def extract_and_print_fields(submit_tool_outputs: RequiredActionSubmitToolOutput
         function_name = each_tool.function.name
         function_args = each_tool.function.arguments
 
-        # logging.info(f"Tool Call ID: {tool_call_id}, Function Name: {
-        #              function_name}, Function Arguments: {function_args}")
+        #print(f"Tool Call ID: {tool_call_id}, Function Name: {function_name}, Function Arguments: {function_args}")
+        print(f"{function_name} -> {function_args}")
 
         if function_name == "get_stock_price":
             break;
